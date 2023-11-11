@@ -19,7 +19,7 @@ def parse_args():
 #    parser.add_argument("--dtype", default="32", help="Use 16 or 32(default) bit float.")
     parser.add_argument("--offload", action="store_true", help="Offload to CPU to use less VRAM.")
     parser.add_argument("--xformers", action="store_true", help="Use xformers.")
-    parser.add_argument("--naughty", action="store_true", help="Naughty or nice.")
+    parser.add_argument("--nice", action="store_true", help="Naughty or nice.")
     parser.add_argument("--port", type=int, default=None, help="Set the listen port.")
     parser.add_argument(
         "--share", action="store_true", help="Set whether to share on Gradio."
@@ -51,7 +51,8 @@ def or_nice(image, device, junk):
 adapter_id = "latent-consistency/lcm-lora-sdv1-5"
 pipe = diffusers.StableDiffusionPipeline.from_single_file(args.model)
 pipe.scheduler = diffusers.LCMScheduler.from_config(pipe.scheduler.config)
-pipe.to("cuda")
+pipe.vae = diffusers.AutoencoderTiny.from_pretrained("madebyollin/taesd", torch_dtype=torch.float32)
+pipe.to(args.device)
 
 # load and fuse lcm lora
 pipe.load_lora_weights(adapter_id)
@@ -65,12 +66,12 @@ pipe.fuse_lora()
 #pipe.vae = diffusers.AutoencoderTiny.from_pretrained(
 #    "madebyollin/taesd", torch_dtype=dtype, use_safetensors=True
 #)
-pipe.to(args.device)
+
 if args.xformers:
     pipe.enable_xformers_memory_efficient_attention()
 if args.offload:
     pipe.enable_sequential_cpu_offload()
-if args.naughty:
+if not args.nice:
     pipe.run_safety_checker = or_nice
 
 def generate_temp_filename(index=1, folder="./outputs/", extension="png"):
@@ -99,11 +100,11 @@ def generate_worker():
             negative_prompt=request["negative_prompt"],
             num_inference_steps=request["steps"],
             guidance_scale=request["cfg"],
-            lcm_origin_steps=50,
             output_type="pil",
             width=request["width"],
             height=request["height"],
         ).images[0]
+#            lcm_origin_steps=50,
         results.append(images)
     results.append(None)
 
@@ -206,10 +207,11 @@ gradio_root = gr.Blocks(
     title="LCM webui",
     theme=None,
     analytics_enabled=False,
+    js=scripts,
 ).queue()
 
 with gradio_root as block:
-    block.load(js=scripts)
+    block.load()
     with gr.Row():
         gr.HTML()
         image = gr.Image(
@@ -265,9 +267,9 @@ with gradio_root as block:
         cfg = gr.Slider(
             label="CFG",
             minimum=0.0,
-            maximum=20.0,
-            step=0.1,
-            value=7.5,
+            maximum=3.0,
+            step=0.05,
+            value=0.0,
         )
         size = gr.Dropdown(
             label="Size",
