@@ -1,5 +1,7 @@
 sdv1lcm-webui
 
+Minimal webui for SDv1 models with the LCM LoRA
+
 # Installation
 
 Create a venv and install requirements.
