@@ -2,6 +2,7 @@ import datetime
 import time
 import math
 import os
+import sys
 import gradio
 import argparse
 import gradio as gr
@@ -85,15 +86,19 @@ def generate_temp_filename(index=1, folder="./outputs/", extension="png"):
 
 queue = []
 results = []
+lastpreview = time.time()
 
 def callback(pipe, idx, step, kwargs):
-    global results
-    latent = pipe.vae.decode(kwargs["latents"][:1][0]).sample
-    latent = torch.clamp((latent + 1.0) / 2.0, min=0.0, max=1.0)
-    latent = 255. * np.moveaxis(latent.cpu().numpy(), 0, 2)
-    latent = latent.astype(np.uint8)
-    preview = Image.fromarray(latent)
-    results.append(("preview", preview))
+    global results, lastpreview
+    now = time.time()
+    if now > lastpreview + 0.1: # limit previews to once every 0.1 seconds
+        lastpreview = now
+        latent = pipe.vae.decode(kwargs["latents"][:1][0]).sample
+        latent = torch.clamp((latent + 1.0) / 2.0, min=0.0, max=1.0)
+        latent = 255. * np.moveaxis(latent.cpu().numpy(), 0, 2)
+        latent = latent.astype(np.uint8)
+        preview = Image.fromarray(latent)
+        results.append(("preview", preview))
     return kwargs
 
 def generate_worker():
