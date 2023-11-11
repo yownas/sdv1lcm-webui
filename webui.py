@@ -11,6 +11,7 @@ from PIL import Image
 from PIL.PngImagePlugin import PngInfo
 import threading
 import random
+import numpy as np
 
 def parse_args():
     parser = argparse.ArgumentParser()
@@ -85,6 +86,16 @@ def generate_temp_filename(index=1, folder="./outputs/", extension="png"):
 queue = []
 results = []
 
+def callback(pipe, idx, step, kwargs):
+    global results
+    latent = pipe.vae.decode(kwargs["latents"][:1][0]).sample
+    latent = torch.clamp((latent + 1.0) / 2.0, min=0.0, max=1.0)
+    latent = 255. * np.moveaxis(latent.cpu().numpy(), 0, 2)
+    latent = latent.astype(np.uint8)
+    preview = Image.fromarray(latent)
+    results.append(("preview", preview))
+    return kwargs
+
 def generate_worker():
     global queue, results
     while len(queue) > 0:
@@ -103,10 +114,11 @@ def generate_worker():
             output_type="pil",
             width=request["width"],
             height=request["height"],
+            callback_on_step_end=callback,
         ).images[0]
 #            lcm_origin_steps=50,
-        results.append(images)
-    results.append(None)
+        results.append(("image", images))
+    results.append((None, None))
 
 def generate(prompt, negative_prompt, steps, cfg, size, seed, image_count):
     global queue, results
@@ -152,7 +164,7 @@ def generate(prompt, negative_prompt, steps, cfg, size, seed, image_count):
         # Wait for data
         while len(results) == 0:
             time.sleep(0.1)
-        images = results.pop(0)
+        response, images = results.pop(0)
         if images is None:
             generating = False
             continue
@@ -163,14 +175,17 @@ def generate(prompt, negative_prompt, steps, cfg, size, seed, image_count):
         preview_grid.paste(preview, (grid_xpos, grid_ypos))
         preview_grid.save(preview_name, optimize=True, quality=35)
 
-        # Save
-        filename = generate_temp_filename(index=i+1)
-        os.makedirs(os.path.dirname(filename), exist_ok=True)
-        metadata = PngInfo()
-        metadata.add_text("parameters", f"prompt: {prompt}\n\nsteps: {steps}\ncfg: {cfg}\nwidth: {width} height: {height}")
-        images.save(filename, pnginfo=metadata)
-        result.append(filename)
-        i+=1
+        if response == "image":
+            # Save
+            filename = generate_temp_filename(index=i+1)
+            os.makedirs(os.path.dirname(filename), exist_ok=True)
+            metadata = PngInfo()
+            metadata.add_text(
+                "parameters", f"prompt: {prompt}\n\nsteps: {steps}\ncfg: {cfg}\nwidth: {width} height: {height}"
+            )
+            images.save(filename, pnginfo=metadata)
+            result.append(filename)
+            i+=1
         yield {image: gr.update(value=preview_name)}
 
     if image_count > 1:
