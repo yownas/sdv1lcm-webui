@@ -321,7 +321,7 @@ with gradio_root as block:
             minimum=0.0,
             maximum=3.0,
             step=0.05,
-            value=0.0,
+            value=1.0,
         )
         size = gr.Dropdown(
             label="Size",
