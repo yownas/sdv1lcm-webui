@@ -109,20 +109,53 @@ def generate_worker():
         seed = int(request["seed"])
         if seed == -1:
             seed = random.randint(0, 2**32)
-        torch.manual_seed(seed)
 
-        images = pipe(
-            prompt=request["prompt"],
-            negative_prompt=request["negative_prompt"],
-            num_inference_steps=request["steps"],
-            guidance_scale=request["cfg"],
-            output_type="pil",
-            width=request["width"],
-            height=request["height"],
-            callback_on_step_end=callback,
-        ).images[0]
-#            lcm_origin_steps=50,
-        results.append(("image", images))
+        pos_ids = pipe.tokenizer(
+            text=request["prompt"],
+            return_tensors="pt", 
+            truncation=False
+        ).input_ids.to("cuda")
+
+        neg_ids = pipe.tokenizer(
+            text=request["negative_prompt"],
+            truncation=False, 
+            padding="max_length",
+            max_length=pos_ids.shape[-1], 
+            return_tensors="pt"
+        ).input_ids.to("cuda")
+
+        max_length = 77
+        pos_embeds = []
+        neg_embeds = []
+        for i in range(0, pos_ids.shape[-1], max_length):
+            pos_embeds.append(
+                pipe.text_encoder(
+                    pos_ids[:, i: i + max_length]
+                )[0]
+            )
+            neg_embeds.append(
+                pipe.text_encoder(
+                    neg_ids[:, i: i + max_length]
+                )[0]
+            )
+
+        pos_embeds = torch.cat(pos_embeds, dim=1)
+        neg_embeds = torch.cat(neg_embeds, dim=1)
+
+        for i in range(request["image_count"]):
+            torch.manual_seed(seed)
+            images = pipe(
+                prompt_embeds=pos_embeds,
+                negative_prompt_embeds=neg_embeds,
+                num_inference_steps=request["steps"],
+                guidance_scale=request["cfg"],
+                output_type="pil",
+                width=request["width"],
+                height=request["height"],
+                callback_on_step_end=callback,
+            ).images[0]
+            results.append(("image", images))
+            seed += 1
     results.append((None, None))
 
 def generate(prompt, negative_prompt, steps, cfg, size, seed, image_count):
@@ -137,18 +170,16 @@ def generate(prompt, negative_prompt, steps, cfg, size, seed, image_count):
     start_time = time.time()
 
     # Create queue
-    for i in range(image_count):
-        queue.append({
-            "prompt": prompt,
-            "negative_prompt": negative_prompt,
-            "steps": int(steps),
-            "cfg": float(cfg),
-            "width": width,
-            "height": height,
-            "seed": seed,
-        })
-        if not seed == -1:
-            seed += 1
+    queue.append({
+        "image_count": image_count,
+        "prompt": prompt,
+        "negative_prompt": negative_prompt,
+        "steps": int(steps),
+        "cfg": float(cfg),
+        "width": width,
+        "height": height,
+        "seed": seed,
+    })
 
     # Start worker
     threading.Thread(target=generate_worker, daemon=True).start()
