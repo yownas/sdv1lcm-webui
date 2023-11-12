@@ -86,13 +86,13 @@ def generate_temp_filename(index=1, folder="./outputs/", extension="png"):
 
 queue = []
 results = []
-lastpreview = time.time()
+sendpreview = True
 
 def callback(pipe, idx, step, kwargs):
-    global results, lastpreview
+    global results, sendpreview
     now = time.time()
-    if now > lastpreview + 0.1: # limit previews to once every 0.1 seconds
-        lastpreview = now
+    if sendpreview:
+        sendpreview = False
         latent = pipe.vae.decode(kwargs["latents"][:1][0]).sample
         latent = torch.clamp((latent + 1.0) / 2.0, min=0.0, max=1.0)
         latent = 255. * np.moveaxis(latent.cpu().numpy(), 0, 2)
@@ -159,7 +159,7 @@ def generate_worker():
     results.append((None, None))
 
 def generate(prompt, negative_prompt, steps, cfg, size, seed, image_count):
-    global queue, results
+    global queue, results, sendpreview
     (width, height) = size.split('x')
     width = int(width)
     height = int(height)
@@ -223,6 +223,7 @@ def generate(prompt, negative_prompt, steps, cfg, size, seed, image_count):
             result.append(filename)
             i+=1
         yield {image: gr.update(value=preview_name)}
+        sendpreview = True
 
     if image_count > 1:
         result.insert(0, preview_name)
